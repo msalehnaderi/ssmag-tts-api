@@ -2,30 +2,39 @@ from flask import Flask, request, send_file
 import edge_tts
 import asyncio
 import os
+import uuid
 
 app = Flask(__name__)
 
 async def generate_audio(text, output_file):
-    # استفاده از صدای "فرید" برای زبان فارسی (مرد). برای صدای زن از "fa-IR-DilaraNeural" استفاده کن.
     communicate = edge_tts.Communicate(text, "fa-IR-FaridNeural")
     await communicate.save(output_file)
 
 @app.route('/api/tts', methods=['GET', 'POST'])
 def tts():
-    # دریافت متن خبر از اپلیکیشن اندروید شما
-    text = request.args.get('text') if request.method == 'GET' else request.form.get('text')
-    
-    if not text:
-        return {"error": "متن برای خواندن ارسال نشده است!"}, 400
+    try:
+        # دریافت متن
+        text = request.args.get('text') if request.method == 'GET' else request.form.get('text')
+        
+        if not text:
+            return {"error": "متن ارسال نشده است"}, 400
 
-    # ورسل به عنوان فضای موقت فقط اجازه نوشتن در پوشه tmp را می‌دهد
-    output_file = "/tmp/output.mp3" 
-    
-    # اجرای عملیات تبدیل متن به صدا
-    asyncio.run(generate_audio(text, output_file))
-    
-    # برگرداندن فایل صوتی آماده به اپلیکیشن به صورت استریم
-    return send_file(output_file, mimetype="audio/mpeg")
+        # تولید یک نام فایل کاملاً اختصاصی (رندوم) برای جلوگیری از تداخل
+        unique_filename = f"{uuid.uuid4()}.mp3"
+        output_file = os.path.join("/tmp", unique_filename)
+        
+        # روش کاملاً ایمن برای اجرای کدهای Async در محیط Serverless ورسل
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(generate_audio(text, output_file))
+        
+        # ارسال فایل به مرورگر/اپلیکیشن
+        return send_file(output_file, mimetype="audio/mpeg")
+        
+    except Exception as e:
+        # با این کار اگر باز هم خطایی رخ دهد، به جای ارور گنگ 500، دقیقاً می‌فهمیم مشکل کجاست
+        return {"error": f"خطای داخلی: {str(e)}"}, 500
 
-if __name__ == '__main__':
-    app.run(debug=True)
+@app.route('/')
+def home():
+    return "سرور تبدیل متن به صدای نشریه (نسخه انتشار عمومی) با موفقیت فعال است!"
