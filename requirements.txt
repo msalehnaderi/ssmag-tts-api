@@ -1,2 +1,1 @@
-Flask
-gTTS
+Flask==3.0.0
