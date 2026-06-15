@@ -1,14 +1,18 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, Response
 import edge_tts
 import asyncio
-import os
-import uuid
 
 app = Flask(__name__)
 
-async def generate_audio(text, output_file):
+# تابع جدید: تولید صدا در حافظه RAM (بدون درگیری با فایل و هارد)
+async def generate_audio_bytes(text):
     communicate = edge_tts.Communicate(text, "fa-IR-FaridNeural")
-    await communicate.save(output_file)
+    audio_data = bytearray()
+    # دریافت تکه‌تکه صدا از مایکروسافت و چسباندن آن‌ها به هم
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data.extend(chunk["data"])
+    return bytes(audio_data)
 
 @app.route('/api/tts', methods=['GET', 'POST'])
 def tts():
@@ -19,22 +23,19 @@ def tts():
         if not text:
             return {"error": "متن ارسال نشده است"}, 400
 
-        # تولید یک نام فایل کاملاً اختصاصی (رندوم) برای جلوگیری از تداخل
-        unique_filename = f"{uuid.uuid4()}.mp3"
-        output_file = os.path.join("/tmp", unique_filename)
-        
-        # روش کاملاً ایمن برای اجرای کدهای Async در محیط Serverless ورسل
+        # اجرای عملیات در یک حلقه امن
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(generate_audio(text, output_file))
+        audio_bytes = loop.run_until_complete(generate_audio_bytes(text))
+        loop.close()
         
-        # ارسال فایل به مرورگر/اپلیکیشن
-        return send_file(output_file, mimetype="audio/mpeg")
+        # ارسال مستقیم بایت‌های صدا به مرورگر/اپلیکیشن
+        return Response(audio_bytes, mimetype="audio/mpeg")
         
     except Exception as e:
-        # با این کار اگر باز هم خطایی رخ دهد، به جای ارور گنگ 500، دقیقاً می‌فهمیم مشکل کجاست
+        # اگر خطایی رخ دهد، ارور دقیق را چاپ می‌کند تا مشکل را بفهمیم
         return {"error": f"خطای داخلی: {str(e)}"}, 500
 
 @app.route('/')
 def home():
-    return "سرور تبدیل متن به صدای نشریه (نسخه انتشار عمومی) با موفقیت فعال است!"
+    return "سرور تبدیل متن به صدای نشریه فعال است!"
