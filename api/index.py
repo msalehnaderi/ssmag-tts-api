@@ -1,13 +1,7 @@
-from flask import Flask, request, send_file
-import gtts.lang
-import os
-import uuid
-
-# 🌟 ترفند طلایی: به جای اینکه سرور از گوگل بپرسد چه زبان‌هایی پشتیبانی می‌شود،
-# خودمان مستقیماً دیکشنری زبان‌ها را دور می‌زنیم تا فیلتر امنیتی گوگل فعال نشود!
-gtts.lang.tts_langs = lambda: {'fa': 'Persian'}
-
-from gtts import gTTS
+from flask import Flask, request, Response
+import urllib.parse
+import urllib.request
+import textwrap
 
 app = Flask(__name__)
 
@@ -19,19 +13,26 @@ def tts():
         if not text:
             return {"error": "متن ارسال نشده است"}, 400
 
-        # ساخت نام تصادفی برای فایل
-        unique_filename = f"{uuid.uuid4()}.mp3"
-        output_file = os.path.join("/tmp", unique_filename)
+        # تکه‌تکه کردن متن به قطعات ۱۵۰ کاراکتری برای عبور از محدودیت گوگل
+        chunks = textwrap.wrap(text, 150)
+        audio_data = bytearray()
         
-        # تبدیل متن به صدا
-        tts_engine = gTTS(text, lang='fa')
-        tts_engine.save(output_file)
+        for chunk in chunks:
+            # درخواست خام و مستقیم از API آزاد گوگل (بدون استفاده از کتابخانه)
+            encoded_text = urllib.parse.quote(chunk)
+            url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=fa&client=tw-ob&q={encoded_text}"
+            
+            # جا زدن خودمان به عنوان یک مرورگر واقعی برای فریب فایروال گوگل
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'})
+            with urllib.request.urlopen(req) as response:
+                audio_data.extend(response.read())
         
-        return send_file(output_file, mimetype="audio/mpeg")
+        # برگرداندن فایل صوتی یکپارچه
+        return Response(bytes(audio_data), mimetype="audio/mpeg")
         
     except Exception as e:
-        return {"error": f"خطای داخلی: {str(e)}"}, 500
+        return {"error": f"خطا در ارتباط با گوگل: {str(e)}"}, 500
 
 @app.route('/')
 def home():
-    return "سرور هوشمند تبدیل متن به صدای نشریه فعال است!"
+    return "سرور تبدیل صدای مستقیم گوگل فعال است!"
