@@ -1,41 +1,30 @@
-from flask import Flask, request, Response
-import edge_tts
-import asyncio
+from flask import Flask, request, send_file
+from gtts import gTTS
+import os
+import uuid
 
 app = Flask(__name__)
-
-# تابع جدید: تولید صدا در حافظه RAM (بدون درگیری با فایل و هارد)
-async def generate_audio_bytes(text):
-    communicate = edge_tts.Communicate(text, "fa-IR-FaridNeural")
-    audio_data = bytearray()
-    # دریافت تکه‌تکه صدا از مایکروسافت و چسباندن آن‌ها به هم
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            audio_data.extend(chunk["data"])
-    return bytes(audio_data)
 
 @app.route('/api/tts', methods=['GET', 'POST'])
 def tts():
     try:
-        # دریافت متن
         text = request.args.get('text') if request.method == 'GET' else request.form.get('text')
-        
         if not text:
             return {"error": "متن ارسال نشده است"}, 400
 
-        # اجرای عملیات در یک حلقه امن
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        audio_bytes = loop.run_until_complete(generate_audio_bytes(text))
-        loop.close()
+        # ساخت نام تصادفی برای فایل
+        unique_filename = f"{uuid.uuid4()}.mp3"
+        output_file = os.path.join("/tmp", unique_filename)
         
-        # ارسال مستقیم بایت‌های صدا به مرورگر/اپلیکیشن
-        return Response(audio_bytes, mimetype="audio/mpeg")
+        # استفاده از موتور صدای گوگل برای زبان فارسی
+        tts_engine = gTTS(text, lang='fa')
+        tts_engine.save(output_file)
+        
+        return send_file(output_file, mimetype="audio/mpeg")
         
     except Exception as e:
-        # اگر خطایی رخ دهد، ارور دقیق را چاپ می‌کند تا مشکل را بفهمیم
         return {"error": f"خطای داخلی: {str(e)}"}, 500
 
 @app.route('/')
 def home():
-    return "سرور تبدیل متن به صدای نشریه فعال است!"
+    return "سرور تبدیل متن به صدای نشریه (موتور گوگل) فعال است!"
