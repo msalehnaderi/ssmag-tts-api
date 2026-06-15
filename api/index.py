@@ -1,38 +1,49 @@
-from flask import Flask, request, Response
+from http.server import BaseHTTPRequestHandler
 import urllib.parse
 import urllib.request
 import textwrap
 
-app = Flask(__name__)
+# در روش بومی، ورسل مستقیماً دنبال کلاس handler می‌گردد
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # ۱. دریافت متنی که در لینک ارسال شده
+        parsed_path = urllib.parse.urlparse(self.path)
+        query_params = urllib.parse.parse_qs(parsed_path.query)
+        text = query_params.get('text', [''])[0]
 
-@app.route('/api/tts', methods=['GET', 'POST'])
-def tts():
-    try:
-        # دریافت متن
-        text = request.args.get('text') if request.method == 'GET' else request.form.get('text')
+        # اگر متنی نبود، ارور ۴۰۰ برگردان
         if not text:
-            return {"error": "متن ارسال نشده است"}, 400
+            self.send_response(400)
+            self.send_header('Content-type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            self.wfile.write("متن برای خواندن ارسال نشده است!".encode('utf-8'))
+            return
 
-        # تکه‌تکه کردن متن به قطعات ۱۵۰ کاراکتری برای عبور از محدودیت گوگل
-        chunks = textwrap.wrap(text, 150)
-        audio_data = bytearray()
-        
-        for chunk in chunks:
-            # درخواست خام و مستقیم از API آزاد گوگل (بدون استفاده از کتابخانه)
-            encoded_text = urllib.parse.quote(chunk)
-            url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=fa&client=tw-ob&q={encoded_text}"
+        try:
+            # ۲. تکه‌تکه کردن متن (چون گوگل متن‌های خیلی طولانی را در یک مرحله قبول نمی‌کند)
+            chunks = textwrap.wrap(text, 150)
+            audio_data = bytearray()
             
-            # جا زدن خودمان به عنوان یک مرورگر واقعی برای فریب فایروال گوگل
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'})
-            with urllib.request.urlopen(req) as response:
-                audio_data.extend(response.read())
-        
-        # برگرداندن فایل صوتی یکپارچه
-        return Response(bytes(audio_data), mimetype="audio/mpeg")
-        
-    except Exception as e:
-        return {"error": f"خطا در ارتباط با گوگل: {str(e)}"}, 500
+            for chunk in chunks:
+                encoded_text = urllib.parse.quote(chunk)
+                url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=fa&client=tw-ob&q={encoded_text}"
+                
+                # جا زدن سرور به عنوان یک مرورگر واقعی
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'})
+                
+                # دریافت فایل صوتی از گوگل و چسباندن آن به تکه‌های قبلی
+                with urllib.request.urlopen(req) as response:
+                    audio_data.extend(response.read())
 
-@app.route('/')
-def home():
-    return "سرور تبدیل صدای مستقیم گوگل فعال است!"
+            # ۳. ارسال فایل صوتی یکپارچه به خروجی (با کد موفقیت ۲۰۰)
+            self.send_response(200)
+            self.send_header('Content-type', 'audio/mpeg')
+            self.end_headers()
+            self.wfile.write(bytes(audio_data))
+            
+        except Exception as e:
+            # مدیریت خطا بدون کرش کردنِ سرور ورسل
+            self.send_response(500)
+            self.send_header('Content-type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(f"Server Error: {str(e)}".encode('utf-8'))
